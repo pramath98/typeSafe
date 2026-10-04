@@ -1,5 +1,6 @@
 import os
 import time
+import re
 from pydantic import BaseModel
 from dotenv import load_dotenv
 # pyrefly: ignore [missing-import]
@@ -29,7 +30,7 @@ def scan_bank_emails(payload: EmailProcessRequest):
 
         # Step 2: Query last 500 messages from senders containing "bank"
         query = "from:bank"
-        results = service.users().messages().list(userId='me', q=query, maxResults=500).execute()
+        results = service.users().messages().list(userId='me', q=query, maxResults=100).execute()
         messages = results.get('messages', [],)
 
         extracted_expenses = []
@@ -69,12 +70,17 @@ def scan_bank_emails(payload: EmailProcessRequest):
             is_txn_prob = jev_response.nouls["is_transaction"].noul
             if is_txn_prob > 0.85: # High confidence filter
                 chosen_category = jev_response.choices["category"].choice
-                
+                is_credit_card = jev_response.nouls["is_cc_transaction"].noul > 0.5
+                # Extract amount locally using safe regex from the snippet/subject
+                amount_match = re.search(r'(?:INR|Rs\.?|₹|\$)\s*([\d,]+\.?\d*)', email_state)
+                extracted_amount = amount_match.group(1) if amount_match else "Unknown"
                 extracted_expenses.append({
                     "id": msg_info['id'],
                     "subject": subject,
                     "snippet": snippet,
                     "category": chosen_category,
+                    "credit_card_transaction": is_credit_card,
+                    "amount": extracted_amount,
                     "confidence": is_txn_prob
                 })
             time.sleep(0.2)
